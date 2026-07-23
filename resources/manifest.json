@@ -1,0 +1,16 @@
+{
+  "yunet": {
+    "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+    "bytes": 232589,
+    "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    "license": "Apache-2.0",
+    "filename": "face_detection_yunet_2023mar.onnx"
+  },
+  "yolo26n": {
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.pt",
+    "bytes": 5544453,
+    "sha256": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef",
+    "license": "AGPL-3.0",
+    "filename": "yolo26n.pt"
+  }
+}
