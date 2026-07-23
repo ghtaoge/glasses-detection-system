@@ -3,13 +3,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Play, RefreshCw, Square } from '@lucide/vue'
 import { api } from '../api/client'
 import type { Dataset, DatasetVersion, EpochMetrics, TrainingSettings, TrainingTask } from '../api/types'
+import { calculateTrainingProgress } from '../domain/training'
 
 type VersionOption = DatasetVersion & { datasetName: string }
 const datasets = ref<Dataset[]>([]); const versions = ref<VersionOption[]>([]); const tasks = ref<TrainingTask[]>([])
 const selectedVersion = ref(''); const current = ref<TrainingTask | null>(null); const epochs = ref<EpochMetrics[]>([])
 const busy = ref(false); const error = ref(''); let events: EventSource | null = null; let poll: number | null = null
 const settings = ref<TrainingSettings>({ preset:'quick', epochs:5, image_size:416, batch_size:4, patience:3, device:'auto' })
-const progress = computed(() => { const last=epochs.value.at(-1); return last ? Math.round(last.epoch/last.epochs*100) : 0 })
+const progress = computed(() => calculateTrainingProgress(current.value, epochs.value))
 const active = computed(() => current.value && ['queued','running','cancelling'].includes(current.value.state))
 const stateText: Record<string,string> = {queued:'等待启动',running:'训练中',cancelling:'正在取消',completed:'训练完成',failed:'训练失败',interrupted:'训练中断'}
 
@@ -23,7 +24,9 @@ async function load() {
   for (const dataset of datasets.value) for (const version of await api.versions(dataset.id)) versions.value.push({...version,datasetName:dataset.name})
   if (!selectedVersion.value && versions.value[0]) selectedVersion.value=versions.value[0].id
   tasks.value=await api.trainingTasks(); const running=tasks.value.find(t=>['queued','running','cancelling'].includes(t.state))
-  if (running) { current.value=running; connect(running.id) }
+  // 没有活动任务时仍恢复最近一次任务，并通过 SSE 从 sequence=0 重放历史指标。
+  const visibleTask=running||tasks.value[0]
+  if (visibleTask) { current.value=visibleTask; epochs.value=[]; connect(visibleTask.id) }
 }
 function connect(id:string) {
   // SSE 提供低延迟 epoch 指标；轮询只承担终态恢复。浏览器休眠或代理中断 SSE 时，
@@ -31,9 +34,12 @@ function connect(id:string) {
   events?.close(); events=new EventSource(api.trainingEventsUrl(id))
   // 重连可能重放最后一条事件，按 epoch 去重后再追加到图表数据。
   events.addEventListener('epoch', event => { const item=JSON.parse((event as MessageEvent).data) as EpochMetrics; if(!epochs.value.some(e=>e.epoch===item.epoch)) epochs.value.push(item) })
-  const refresh=async()=>{ current.value=await api.trainingTask(id); if(!['queued','running','cancelling'].includes(current.value.state)){ events?.close(); if(poll) window.clearInterval(poll); tasks.value=await api.trainingTasks() } }
-  for (const name of ['completed','failed']) events.addEventListener(name, refresh)
-  if(poll) window.clearInterval(poll); poll=window.setInterval(()=>refresh().catch(()=>{}),1500)
+  const finish=async()=>{ current.value=await api.trainingTask(id); events?.close(); if(poll) window.clearInterval(poll); tasks.value=await api.trainingTasks() }
+  // 只有收到流内的终态事件后才关闭连接。若轮询抢先看到 completed，SSE 仍继续
+  // 派发排在 completed 之前的所有 epoch，避免最后一批图表数据被截断。
+  for (const name of ['completed','failed']) events.addEventListener(name, finish)
+  const refreshState=async()=>{ current.value=await api.trainingTask(id); if(!['queued','running','cancelling'].includes(current.value.state)){ if(poll) window.clearInterval(poll); tasks.value=await api.trainingTasks() } }
+  if(poll) window.clearInterval(poll); poll=window.setInterval(()=>refreshState().catch(()=>{}),1500)
 }
 async function start() { if(!selectedVersion.value)return; busy.value=true; error.value=''; epochs.value=[]; try { current.value=await api.startTraining(selectedVersion.value,settings.value); tasks.value.unshift(current.value); connect(current.value.id) } catch(e){error.value=(e as Error).message} finally{busy.value=false} }
 async function cancel(){if(!current.value)return; current.value=await api.cancelTraining(current.value.id)}
