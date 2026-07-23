@@ -148,12 +148,13 @@ class ModelRepository:
 
     def create(
         self,
-        task_id: str,
+        task_id: str | None,
         name: str,
         onnx_path: str,
         onnx_sha256: str,
         class_names: list[str],
         metrics: dict,
+        quality_status: str | None = None,
     ) -> dict:
         with self.session_factory() as session:
             row = ModelRow(
@@ -163,9 +164,33 @@ class ModelRepository:
                 onnx_sha256=onnx_sha256,
                 class_names=class_names,
                 metrics=metrics,
-                quality_status="passed" if metrics.get("map50", 0) >= 0.80 else "below_target",
+                quality_status=quality_status
+                or ("passed" if metrics.get("map50", 0) >= 0.80 else "below_target"),
             )
             session.add(row)
+            session.commit()
+            return self.serialize(row)
+
+    def upsert_pretrained(
+        self,
+        name: str,
+        onnx_path: str,
+        onnx_sha256: str,
+        class_names: list[str],
+        metrics: dict,
+    ) -> dict:
+        """Create or refresh the single application-owned pretrained model record."""
+
+        with self.session_factory() as session:
+            row = session.scalar(select(ModelRow).where(ModelRow.onnx_path == onnx_path))
+            if row is None:
+                row = ModelRow(training_task_id=None, onnx_path=onnx_path)
+                session.add(row)
+            row.name = name
+            row.onnx_sha256 = onnx_sha256
+            row.class_names = class_names
+            row.metrics = metrics
+            row.quality_status = "pretrained"
             session.commit()
             return self.serialize(row)
 

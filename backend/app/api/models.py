@@ -13,6 +13,13 @@ def list_models(request: Request) -> list[dict]:
     return request.app.state.models.list()
 
 
+@router.post("/models/pretrained/install", status_code=201)
+def install_pretrained_model(request: Request) -> dict:
+    """Install and activate the vetted MIT-licensed local inference pipeline."""
+
+    return request.app.state.pretrained_models.install()
+
+
 @router.get("/models/{model_id}")
 def get_model(model_id: str, request: Request) -> dict:
     return request.app.state.models.get(model_id)
@@ -21,7 +28,7 @@ def get_model(model_id: str, request: Request) -> dict:
 @router.post("/models/{model_id}/activate")
 def activate_model(model_id: str, request: Request) -> dict:
     model = request.app.state.models.get(model_id)
-    if model["quality_status"] != "passed":
+    if model["quality_status"] not in {"passed", "pretrained"}:
         raise AppError("MODEL_QUALITY_BELOW_TARGET", "模型未达到 mAP@0.5 质量门槛", 409)
     path = request.app.state.storage.resolve(model["onnx_path"])
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != model["onnx_sha256"]:
@@ -39,8 +46,15 @@ def activate_model(model_id: str, request: Request) -> dict:
         try:
             import onnxruntime as ort
 
-            ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            if model["metrics"].get("engine") == "face_glasses_classifier_v1":
+                if not request.app.state.resources.valid("yunet"):
+                    raise AppError("FACE_MODEL_UNAVAILABLE", "YuNet 人脸模型不可用", 409)
+                if session.get_outputs()[0].shape[-1] != 2:
+                    raise AppError("MODEL_LOAD_FAILED", "公开分类模型输出无效", 409)
         except Exception as exc:
+            if isinstance(exc, AppError):
+                raise
             raise AppError("MODEL_LOAD_FAILED", "ONNX 模型加载失败", 409) from exc
     return request.app.state.models.activate(model_id)
 

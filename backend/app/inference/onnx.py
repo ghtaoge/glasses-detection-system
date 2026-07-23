@@ -105,11 +105,10 @@ class OnnxInferenceEngine:
                 candidates.append((float(score), int(class_id), box))
         accepted: list[Detection] = []
         for score, class_id, box in sorted(candidates, reverse=True, key=lambda item: item[0]):
-            # NMS 必须按类别执行。普通眼镜和墨镜框即使重叠，也应保留给上层判断，
-            # 而不是因为几何重叠直接互相抑制。
+            # 三个标签描述同一张脸上的互斥状态，因此跨类别高度重叠的候选框也必须
+            # 互相抑制。保留最高置信度项，避免同一张脸同时显示普通眼镜和墨镜。
             if any(
-                item.class_id == class_id and self._box_iou(box, item.box) > iou
-                for item in accepted
+                self._box_iou(box, item.box) > iou for item in accepted
             ):
                 continue
             accepted.append(Detection(box, class_id, ClassName(CLASS_NAMES[class_id]), score))

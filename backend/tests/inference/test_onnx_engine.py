@@ -33,7 +33,7 @@ def test_decodes_letterboxed_yolo_output() -> None:
     assert (round(box.x1), round(box.y1), round(box.x2), round(box.y2)) == (150, 75, 450, 225)
 
 
-def test_nms_is_class_aware() -> None:
+def test_nms_suppresses_overlapping_mutually_exclusive_classes() -> None:
     output = np.zeros((1, 7, 2), dtype=np.float32)
     output[0, :, 0] = [320, 320, 200, 200, 0.05, 0.9, 0.1]
     output[0, :, 1] = [320, 320, 200, 200, 0.05, 0.1, 0.8]
@@ -41,4 +41,5 @@ def test_nms_is_class_aware() -> None:
 
     result = engine.infer(np.zeros((640, 640, 3), dtype=np.uint8), 0.25, 0.45)
 
-    assert len(result.detections) == 2
+    assert len(result.detections) == 1
+    assert result.detections[0].class_name.value == "eyeglasses"

@@ -57,6 +57,9 @@ export const api = {
   ),
   cancelTraining: (id: string) => request<TrainingTask>(`/api/training/${id}/cancel`, { method: 'POST' }),
   models: () => request<ModelRecord[]>('/api/models'),
+  installPretrainedModel: () => request<ModelRecord>('/api/models/pretrained/install', {
+    method: 'POST'
+  }),
   activateModel: (id: string) => request<ModelRecord>(`/api/models/${id}/activate`, { method: 'POST' }),
   modelDownloadUrl: (id: string) => `${API}/api/models/${id}/download`,
   trainingEventsUrl: (id: string) => `${API}/api/training/${id}/events`,

@@ -21,6 +21,7 @@ from app.repositories.datasets import DatasetRepository
 from app.repositories.history import HistoryRepository
 from app.repositories.training import ModelRepository, TrainingRepository
 from app.services.image_inference import HistoryService, ImageInferenceService
+from app.services.pretrained_models import PretrainedModelInstaller
 from app.services.publication import DatasetPublisher
 from app.services.resources import ResourceService
 from app.services.storage import ManagedStorage
@@ -70,11 +71,13 @@ def create_app(
             app.state.resources,
             fake=use_fake_training,
         )
+        app.state.pretrained_models = PretrainedModelInstaller(models, app.state.resources, storage)
         app.state.inference = ImageInferenceService(
             models,
             history,
             storage,
             app.state.validator,
+            resources=app.state.resources,
             allow_fake=fake_inference,
         )
         app.state.history_service = HistoryService(history, storage)

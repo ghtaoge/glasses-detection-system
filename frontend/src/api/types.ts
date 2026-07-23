@@ -82,6 +82,11 @@ export interface EvaluationMetrics {
   per_class: Partial<Record<ClassName, { map50: number }>>
   confusion_matrix?: number[][]
   simulated?: boolean
+  pretrained?: boolean
+  engine?: string
+  source?: string
+  license?: string
+  published_f1?: { anyglasses: number; sunglasses: number }
 }
 
 export interface TrainingTask {
@@ -98,12 +103,12 @@ export interface TrainingTask {
 
 export interface ModelRecord {
   id: string
-  training_task_id: string
+  training_task_id: string | null
   name: string
   onnx_sha256: string
   class_names: ClassName[]
   metrics: EvaluationMetrics
-  quality_status: 'passed' | 'below_target'
+  quality_status: 'passed' | 'below_target' | 'pretrained'
   is_active: boolean
   created_at: string
 }

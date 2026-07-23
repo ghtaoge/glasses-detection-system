@@ -10,17 +10,22 @@ from PIL import Image
 from app.core.errors import AppError
 from app.inference.fake import FakeInferenceEngine
 from app.inference.onnx import OnnxInferenceEngine
+from app.inference.pretrained import PretrainedGlassesInferenceEngine
 from app.services.rendering import render_detections
+from app.services.yunet import YuNetFaceDetector
 
 
 class ImageInferenceService:
     """加载当前活动模型，执行推理，并按需原子保存结果。"""
 
-    def __init__(self, models, history, storage, validator, allow_fake: bool = False) -> None:
+    def __init__(
+        self, models, history, storage, validator, resources=None, allow_fake: bool = False
+    ) -> None:
         self.models = models
         self.history = history
         self.storage = storage
         self.validator = validator
+        self.resources = resources
         self.allow_fake = allow_fake
 
     def run(
@@ -82,10 +87,21 @@ class ImageInferenceService:
                 import onnxruntime as ort
 
                 session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-                input_shape = session.get_inputs()[0].shape
-                input_size = int(input_shape[-1]) if isinstance(input_shape[-1], int) else 640
-                engine = OnnxInferenceEngine(session, model["id"], input_size)
+                if model["metrics"].get("engine") == "face_glasses_classifier_v1":
+                    if self.resources is None or not self.resources.valid("yunet"):
+                        raise AppError("FACE_MODEL_UNAVAILABLE", "YuNet 人脸模型不可用", 409)
+                    engine = PretrainedGlassesInferenceEngine(
+                        session,
+                        YuNetFaceDetector(self.resources.path("yunet")),
+                        model["id"],
+                    )
+                else:
+                    input_shape = session.get_inputs()[0].shape
+                    input_size = int(input_shape[-1]) if isinstance(input_shape[-1], int) else 640
+                    engine = OnnxInferenceEngine(session, model["id"], input_size)
             except Exception as exc:
+                if isinstance(exc, AppError):
+                    raise
                 raise AppError("MODEL_LOAD_FAILED", "当前 ONNX 模型无法加载", 409) from exc
         return validated, engine.infer(image_array, confidence, iou)
 
