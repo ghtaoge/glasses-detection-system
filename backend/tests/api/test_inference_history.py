@@ -49,7 +49,14 @@ def activate_fake_model(client: TestClient) -> None:
 
 
 def test_image_inference_saves_filterable_history(tmp_path) -> None:
-    with TestClient(create_app(data_dir=tmp_path, min_per_class=1, fake_training=True)) as client:
+    with TestClient(
+        create_app(
+            data_dir=tmp_path,
+            min_per_class=1,
+            fake_training=True,
+            fake_inference=True,
+        )
+    ) as client:
         activate_fake_model(client)
         response = client.post(
             "/api/inference/image",
@@ -76,3 +83,26 @@ def test_image_inference_requires_active_model(tmp_path) -> None:
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ACTIVE_MODEL_REQUIRED"
+
+
+def test_normal_app_rejects_previously_activated_simulated_model(tmp_path) -> None:
+    # 先用测试专用装配创建并激活模拟模型，复现开发数据库遗留 active 标记的场景。
+    with TestClient(
+        create_app(
+            data_dir=tmp_path,
+            min_per_class=1,
+            fake_training=True,
+            fake_inference=True,
+        )
+    ) as client:
+        activate_fake_model(client)
+
+    # 正常应用重新打开同一数据库时，不再信任该模拟模型的固定检测结果。
+    with TestClient(create_app(data_dir=tmp_path, fake_training=True)) as client:
+        response = client.post(
+            "/api/inference/image",
+            files={"file": ("face.jpg", make_image("white"), "image/jpeg")},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "SIMULATED_MODEL_NOT_FOR_INFERENCE"

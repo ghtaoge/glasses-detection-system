@@ -27,8 +27,14 @@ def activate_model(model_id: str, request: Request) -> dict:
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != model["onnx_sha256"]:
         raise AppError("MODEL_CHECKSUM_MISMATCH", "模型文件校验失败", 409)
     if path.name.endswith(".fake.onnx"):
-        if not request.app.state.fake_training:
-            raise AppError("MODEL_LOAD_FAILED", "模拟模型不能用于推理", 409)
+        # fake_training 允许快速验证训练流程，但不代表产物具有推理能力。
+        # 只有后端测试显式打开 fake_inference 时，才允许激活固定输出引擎。
+        if not request.app.state.fake_inference:
+            raise AppError(
+                "SIMULATED_MODEL_NOT_FOR_INFERENCE",
+                "模拟测试模型不能用于真实识别，请训练真实 ONNX 模型",
+                409,
+            )
     else:
         try:
             import onnxruntime as ort

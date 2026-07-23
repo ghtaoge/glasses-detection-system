@@ -43,7 +43,14 @@ def publish_dataset(client: TestClient) -> str:
 
 
 def test_training_creates_model(tmp_path) -> None:
-    with TestClient(create_app(data_dir=tmp_path, min_per_class=1, fake_training=True)) as client:
+    with TestClient(
+        create_app(
+            data_dir=tmp_path,
+            min_per_class=1,
+            fake_training=True,
+            fake_inference=True,
+        )
+    ) as client:
         version_id = publish_dataset(client)
         response = client.post(
             "/api/training",
@@ -65,6 +72,25 @@ def test_training_creates_model(tmp_path) -> None:
         activated = client.post(f"/api/models/{models[0]['id']}/activate")
         assert activated.status_code == 200
         assert activated.json()["is_active"] is True
+
+
+def test_simulated_model_cannot_be_activated_by_normal_app(tmp_path) -> None:
+    with TestClient(create_app(data_dir=tmp_path, min_per_class=1, fake_training=True)) as client:
+        version_id = publish_dataset(client)
+        task = client.post(
+            "/api/training",
+            json={"dataset_version_id": version_id, "preset": "quick", "epochs": 1},
+        ).json()
+        for _ in range(100):
+            if client.get(f"/api/training/{task['id']}").json()["state"] == "completed":
+                break
+            time.sleep(0.02)
+
+        model = client.get("/api/models").json()[0]
+        response = client.post(f"/api/models/{model['id']}/activate")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "SIMULATED_MODEL_NOT_FOR_INFERENCE"
 
 
 def test_training_rejects_unknown_settings(tmp_path) -> None:

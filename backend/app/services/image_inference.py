@@ -16,11 +16,12 @@ from app.services.rendering import render_detections
 class ImageInferenceService:
     """加载当前活动模型，执行推理，并按需原子保存结果。"""
 
-    def __init__(self, models, history, storage, validator) -> None:
+    def __init__(self, models, history, storage, validator, allow_fake: bool = False) -> None:
         self.models = models
         self.history = history
         self.storage = storage
         self.validator = validator
+        self.allow_fake = allow_fake
 
     def run(
         self,
@@ -65,9 +66,16 @@ class ImageInferenceService:
         if image_array is None:
             raise AppError("IMAGE_DECODE_FAILED", "图片解码失败")
         model_path = self.storage.resolve(model["onnx_path"])
-        # 模拟产物只在显式测试模式下可被激活；这里保留同一业务调用面，方便端到端
-        # 测试覆盖真实的上传、历史和渲染流程。
+        # FakeInferenceEngine 返回的是用于端到端测试的固定检测框，不具备识别能力。
+        # 除非测试装配显式授权，否则即使旧数据库仍把模拟模型标成 active，也必须在
+        # 推理边界再次拦截，避免伪造结果进入历史记录或摄像头画面。
         if model_path.name.endswith(".fake.onnx"):
+            if not self.allow_fake:
+                raise AppError(
+                    "SIMULATED_MODEL_NOT_FOR_INFERENCE",
+                    "当前启用的是模拟测试模型，不能用于真实识别；请训练并启用真实 ONNX 模型",
+                    409,
+                )
             engine = FakeInferenceEngine(model["id"])
         else:
             try:

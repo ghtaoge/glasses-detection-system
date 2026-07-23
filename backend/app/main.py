@@ -32,6 +32,7 @@ def create_app(
     data_dir: Path | None = None,
     min_per_class: int = 10,
     fake_training: bool | None = None,
+    fake_inference: bool = False,
 ) -> FastAPI:
     settings = load_settings(data_dir)
     use_fake_training = settings.fake_training if fake_training is None else fake_training
@@ -54,6 +55,9 @@ def create_app(
         app.state.training_repository = training_repository
         app.state.history = history
         app.state.fake_training = use_fake_training
+        # 模拟训练只负责快速生成测试产物。模拟推理必须由测试代码单独显式开启，
+        # 防止正常启动的应用把固定检测框展示成真实模型结果。
+        app.state.fake_inference = fake_inference
         app.state.validator = UploadValidator(settings.max_upload_bytes, settings.max_image_pixels)
         app.state.publisher = DatasetPublisher(database.session_factory, storage, min_per_class)
         manifest = Path(__file__).resolve().parents[2] / "resources" / "manifest.json"
@@ -66,7 +70,13 @@ def create_app(
             app.state.resources,
             fake=use_fake_training,
         )
-        app.state.inference = ImageInferenceService(models, history, storage, app.state.validator)
+        app.state.inference = ImageInferenceService(
+            models,
+            history,
+            storage,
+            app.state.validator,
+            allow_fake=fake_inference,
+        )
         app.state.history_service = HistoryService(history, storage)
         training_repository.interrupt_active()
         yield
