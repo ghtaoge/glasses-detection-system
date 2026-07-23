@@ -11,6 +11,16 @@ def make_image(color: str) -> bytes:
     return output.getvalue()
 
 
+def test_dataset_name_preserves_unicode(tmp_path) -> None:
+    with TestClient(create_app(data_dir=tmp_path)) as client:
+        created = client.post("/api/datasets", json={"name": "中文眼镜数据集"})
+        listed = client.get("/api/datasets")
+
+    assert created.status_code == 201
+    assert created.json()["name"] == "中文眼镜数据集"
+    assert listed.json()[0]["name"] == "中文眼镜数据集"
+
+
 def test_import_annotate_and_publish(tmp_path) -> None:
     with TestClient(create_app(data_dir=tmp_path, min_per_class=1)) as client:
         dataset = client.post("/api/datasets", json={"name": "教学数据"}).json()
