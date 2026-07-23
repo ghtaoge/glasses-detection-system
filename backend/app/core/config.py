@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     max_image_pixels: int = 24_000_000
     host: str = "127.0.0.1"
     port: int = 8000
+    fake_training: bool = False
 
 
 def load_settings(data_dir: Path | None = None) -> Settings:

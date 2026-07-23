@@ -1,1 +1,0 @@
-{"root":["./src/main.ts","./src/router.ts","./src/vite-env.d.ts","./src/api/client.ts","./src/api/types.ts","./src/app.vue","./src/components/annotationcanvas.vue","./src/views/annotationview.vue","./src/views/datasetsview.vue","./src/views/placeholderview.vue","./tests/annotation-canvas.test.ts"],"version":"6.0.3"}

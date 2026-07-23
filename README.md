@@ -9,18 +9,8 @@
 需要 Python 3.11-3.13、Node.js 24+。
 
 ```powershell
-py -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
-.venv\Scripts\alembic -c backend/alembic.ini upgrade head
-.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
-```
-
-另开终端启动前端：
-
-```powershell
-cd frontend
-npm install
-npm run dev
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1
 ```
 
 访问 `http://127.0.0.1:5173`。
@@ -36,6 +26,8 @@ npm run dev
 CUDA 版本的 PyTorch 必须按 PyTorch 官方安装器选择与本机驱动匹配的版本。首次资源下载需要联网；完成后数据标注、训练和推理均在本地执行。
 
 公开教学数据源 `Glasses and Coverings` 采用 CC BY-NC 4.0，仅用于非商业教学。系统不会把数据集提交到仓库。
+
+系统包含概览、数据集、标注工作台、训练评估、模型库、识别中心和历史记录七个页面。详细操作见 [本地运维指南](docs/OPERATIONS.md)，数据处理边界见 [隐私与使用边界](docs/PRIVACY.md)。
 
 ## 验证
 

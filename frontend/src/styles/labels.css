@@ -1,0 +1,4 @@
+.detection-box span,.annotation-box span{background:#4b5563}
+.detection-box.no_glasses span,.annotation-box.no_glasses span{background:#2ca876}
+.detection-box.eyeglasses span,.annotation-box.eyeglasses span{background:#3f8ddb}
+.detection-box.sunglasses span,.annotation-box.sunglasses span{background:#df6e50}

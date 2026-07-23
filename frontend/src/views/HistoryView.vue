@@ -1,0 +1,15 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { RefreshCw, Trash2, X } from '@lucide/vue'
+import { api } from '../api/client'
+import type { ClassName, DetectionRecord } from '../api/types'
+import DetectionCanvas from '../components/DetectionCanvas.vue'
+const records=ref<DetectionRecord[]>([]); const selected=ref<DetectionRecord|null>(null); const source=ref(''); const className=ref(''); const error=ref(''); const busy=ref(false)
+const labels:Record<ClassName,string>={no_glasses:'未戴眼镜',eyeglasses:'普通眼镜',sunglasses:'墨镜'}
+async function load(){records.value=(await api.history({source:source.value,class_name:className.value})).items;if(selected.value)selected.value=records.value.find(r=>r.id===selected.value?.id)||null}
+async function remove(record:DetectionRecord){if(!window.confirm('确认删除这条检测记录及图片？'))return;busy.value=true;try{await api.deleteHistory(record.id);selected.value=null;await load()}catch(e){error.value=(e as Error).message}finally{busy.value=false}}
+onMounted(()=>load().catch(e=>error.value=e.message))
+</script>
+<template><section><header class="page-header"><div><p class="eyebrow">本地记录</p><h1>历史记录</h1></div><button class="icon-button" title="刷新" aria-label="刷新" @click="load"><RefreshCw :size="18"/></button></header><p v-if="error" class="error-banner">{{ error }}</p><div class="history-filters"><select v-model="source" aria-label="来源" @change="load"><option value="">全部来源</option><option value="image">图片检测</option><option value="camera">摄像头快照</option></select><select v-model="className" aria-label="类别" @change="load"><option value="">全部类别</option><option v-for="(label,key) in labels" :key="key" :value="key">{{ label }}</option></select></div><div v-if="records.length" class="history-list"><button v-for="record in records" :key="record.id" @click="selected=record"><img :src="api.fileUrl(record.annotated_url)" alt="检测缩略图"/><span><strong>{{ record.source==='image'?'图片检测':'摄像头快照' }}</strong><small>{{ new Date(record.created_at).toLocaleString() }}</small></span><span class="face-count">{{ record.detections.length }} 张人脸</span><span class="history-classes"><i v-for="item in record.detections" :key="item.id" :class="item.class_name"></i></span></button></div><div v-else class="empty-state"><strong>暂无检测记录</strong></div>
+  <div v-if="selected" class="detail-overlay" @click.self="selected=null"><div class="history-detail"><header><div><p class="eyebrow">检测详情</p><h2>{{ new Date(selected.created_at).toLocaleString() }}</h2></div><button class="icon-button" aria-label="关闭" title="关闭" @click="selected=null"><X :size="18"/></button></header><DetectionCanvas :src="api.fileUrl(selected.original_url)" :width="selected.width" :height="selected.height" :detections="selected.detections"/><div class="detail-meta"><span>{{ selected.device }}</span><span>{{ selected.duration_ms.toFixed(1) }} ms</span><span>{{ selected.detections.length }} 张人脸</span></div><div class="detail-actions"><button class="command-button danger" :disabled="busy" @click="remove(selected)"><Trash2 :size="16"/>删除记录</button></div></div></div>
+</section></template>
