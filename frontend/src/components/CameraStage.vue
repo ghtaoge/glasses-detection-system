@@ -10,12 +10,16 @@ const detections=ref<DetectionItem[]>([]); const width=ref(1280); const height=r
 const latency=ref(0); const dropped=ref(0); const saving=ref(false); let socket:WebSocket|null=null; let timer:number|null=null; let frameId=0; let lastBlob:Blob|null=null
 const labels:Record<ClassName,string>={no_glasses:'未戴眼镜',eyeglasses:'普通眼镜',sunglasses:'墨镜'}
 const socketUrl=computed(()=>api.cameraSocketUrl())
+// 浏览器只有在用户点击启动后才请求权限。设备标签通常也只有授权后才能读取。
 async function listDevices(){devices.value=(await navigator.mediaDevices.enumerateDevices()).filter(item=>item.kind==='videoinput');if(!deviceId.value&&devices.value[0])deviceId.value=devices.value[0].deviceId}
 async function start(){error.value='';try{stream.value=await navigator.mediaDevices.getUserMedia({video:{deviceId:deviceId.value?{exact:deviceId.value}:undefined,width:{ideal:1280},height:{ideal:720}},audio:false});if(!video.value)return;video.value.srcObject=stream.value;await video.value.play();width.value=video.value.videoWidth||1280;height.value=video.value.videoHeight||720;await listDevices();connect();running.value=true}catch(e){error.value=(e as Error).name==='NotAllowedError'?'摄像头权限被拒绝':'无法启动摄像头'}}
+// ready 同时充当背压信号：收到上一帧结果前不再捕获，避免慢 CPU 上无限堆帧。
 function connect(){socket=new WebSocket(socketUrl.value);socket.onmessage=event=>{const data=JSON.parse(event.data);if(data.type==='ready'){ready.value=true;schedule()}else if(data.type==='result'){detections.value=data.detections;latency.value=data.round_trip_ms;dropped.value=data.dropped_frames;ready.value=true;schedule()}else if(data.type==='error'){error.value=data.message||`摄像头错误：${data.error_code}`;ready.value=true;schedule()}};socket.onerror=()=>error.value='实时连接中断';socket.onclose=()=>ready.value=false}
 function schedule(){if(!running.value||!ready.value)return;if(timer)window.clearTimeout(timer);timer=window.setTimeout(captureFrame,1000/fps.value)}
 function captureFrame(){if(!video.value||!capture.value||!socket||socket.readyState!==WebSocket.OPEN||!ready.value)return;const canvas=capture.value;canvas.width=video.value.videoWidth;canvas.height=video.value.videoHeight;canvas.getContext('2d')?.drawImage(video.value,0,0,canvas.width,canvas.height);ready.value=false;canvas.toBlob(blob=>{if(!blob||!socket)return;lastBlob=blob;frameId++;socket.send(JSON.stringify({type:'frame_meta',version:1,frame_id:frameId,captured_at_ms:Date.now(),width:canvas.width,height:canvas.height,content_type:'image/jpeg',confidence:confidence.value}));socket.send(blob)},'image/jpeg',.75)}
+// 组件卸载也调用 stop，确保路由切换后摄像头指示灯和 MediaStreamTrack 都会关闭。
 function stop(){if(timer)window.clearTimeout(timer);timer=null;socket?.close();socket=null;stream.value?.getTracks().forEach(track=>track.stop());stream.value=null;running.value=false;ready.value=false;detections.value=[];if(video.value)video.value.srcObject=null}
+// 快照由服务端重新验证并推理；不信任屏幕上的客户端检测框作为历史数据。
 async function save(){if(!lastBlob)return;saving.value=true;error.value='';try{const file=new File([lastBlob],`camera-${Date.now()}.jpg`,{type:'image/jpeg'});const record=await api.saveSnapshot(file,confidence.value);emit('saved',record)}catch(e){error.value=(e as Error).message}finally{saving.value=false}}
 onBeforeUnmount(stop)
 </script>

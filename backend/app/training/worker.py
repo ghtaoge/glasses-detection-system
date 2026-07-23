@@ -1,3 +1,9 @@
+"""隔离 Ultralytics 的训练子进程入口。
+
+worker 只读取父进程生成的 JSON 请求，通过 JSONL 追加事件，并在所有模型产物验证
+完成后写入 result.json。它不接收任意 shell 参数或用户提供的输出路径。
+"""
+
 import argparse
 import hashlib
 import json
@@ -6,6 +12,8 @@ from pathlib import Path
 
 
 def write_event(path: Path, event: dict) -> None:
+    """写入一条完整事件并刷盘，父进程只会读取完整 JSON 行。"""
+
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event) + "\n")
         handle.flush()
@@ -26,6 +34,7 @@ def main() -> int:
     model = YOLO(request["model"])
 
     def epoch_callback(trainer) -> None:
+        # 取消标记在 epoch 回调中检查，让 Ultralytics 有机会完成当前批次并释放资源。
         if cancel_path.exists():
             raise KeyboardInterrupt("training cancelled")
         metrics = trainer.metrics or {}
@@ -74,6 +83,8 @@ def main() -> int:
     import numpy as np
     import onnxruntime as ort
 
+    # 注册模型前必须在 CPU provider 上实际执行一次。导出成功不等于运行时可以
+    # 加载；该检查可提前发现不支持的算子、损坏文件和非有限输出。
     session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     model_input = session.get_inputs()[0]
     shape = [1, 3, request["image_size"], request["image_size"]]

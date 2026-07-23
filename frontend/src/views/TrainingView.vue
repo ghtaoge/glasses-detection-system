@@ -26,7 +26,10 @@ async function load() {
   if (running) { current.value=running; connect(running.id) }
 }
 function connect(id:string) {
+  // SSE 提供低延迟 epoch 指标；轮询只承担终态恢复。浏览器休眠或代理中断 SSE 时，
+  // 页面仍能在下一次轮询中得到 completed/failed，避免永远停留在“训练中”。
   events?.close(); events=new EventSource(api.trainingEventsUrl(id))
+  // 重连可能重放最后一条事件，按 epoch 去重后再追加到图表数据。
   events.addEventListener('epoch', event => { const item=JSON.parse((event as MessageEvent).data) as EpochMetrics; if(!epochs.value.some(e=>e.epoch===item.epoch)) epochs.value.push(item) })
   const refresh=async()=>{ current.value=await api.trainingTask(id); if(!['queued','running','cancelling'].includes(current.value.state)){ events?.close(); if(poll) window.clearInterval(poll); tasks.value=await api.trainingTasks() } }
   for (const name of ['completed','failed']) events.addEventListener(name, refresh)

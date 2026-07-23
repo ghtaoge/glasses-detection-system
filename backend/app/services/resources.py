@@ -1,3 +1,5 @@
+"""下载并校验应用允许使用的固定外部模型资源。"""
+
 import hashlib
 import json
 import os
@@ -29,6 +31,8 @@ class ResourceService:
         )
 
     def fetch(self, name: str) -> Path:
+        """流式下载资源，校验长度和 SHA-256 后再原子替换目标文件。"""
+
         entry = self._entry(name)
         target = self.path(name)
         if self.valid(name):
@@ -37,6 +41,8 @@ class ResourceService:
         try:
             with httpx.stream("GET", entry["url"], follow_redirects=True, timeout=120) as response:
                 response.raise_for_status()
+                # 永远不直接写最终路径：下载中断时旧资源仍保持可用，partial 文件
+                # 会在 finally 中清除。
                 with tempfile.NamedTemporaryFile(
                     dir=self.target_dir, suffix=".partial", delete=False
                 ) as handle:
@@ -49,6 +55,7 @@ class ResourceService:
                         handle.write(chunk)
             if partial.stat().st_size != entry["bytes"] or self._sha256(partial) != entry["sha256"]:
                 raise AppError("RESOURCE_CHECKSUM_MISMATCH", "资源文件校验失败")
+            # 校验完成后才发布；os.replace 在同一文件系统内是原子的。
             os.replace(partial, target)
             return target
         finally:

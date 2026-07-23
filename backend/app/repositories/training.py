@@ -1,3 +1,5 @@
+"""训练事件和模型注册表的同步 SQLAlchemy 仓储。"""
+
 from __future__ import annotations
 
 from sqlalchemy import func, select, update
@@ -18,6 +20,7 @@ class TrainingRepository:
                     TrainingTaskRow.state.in_(["queued", "running", "cancelling"])
                 )
             )
+            # 本地工作站只允许一个活动训练，避免两个 worker 同时争用 GPU 和产物目录。
             if active:
                 raise AppError("TRAINING_ALREADY_ACTIVE", "已有训练任务正在运行", 409)
             row = TrainingTaskRow(
@@ -56,6 +59,7 @@ class TrainingRepository:
             if row is None:
                 raise AppError("TRAINING_TASK_NOT_FOUND", "训练任务不存在", 404)
             current = TrainingState(row.state)
+            # 所有调用方都必须经过同一状态图，防止取消中的任务被误标为完成。
             if target not in ALLOWED_TRANSITIONS[current]:
                 raise AppError(
                     "TRAINING_STATE_INVALID", f"不能从 {current.value} 切换到 {target.value}", 409
@@ -70,6 +74,7 @@ class TrainingRepository:
 
     def append_event(self, task_id: str, event_type: str, payload: dict) -> dict:
         with self.session_factory() as session:
+            # sequence 是任务内递增游标，SSE 客户端可用 Last-Event-ID 断点续传。
             sequence = (
                 session.scalar(
                     select(func.max(TrainingEventRow.sequence)).where(
@@ -185,6 +190,7 @@ class ModelRepository:
             row = session.get(ModelRow, model_id)
             if row is None:
                 raise AppError("MODEL_NOT_FOUND", "模型不存在", 404)
+            # 清除旧标记与启用新模型位于同一事务，外部永远不会观察到两个活动模型。
             session.execute(update(ModelRow).values(active=False))
             row.active = True
             session.commit()

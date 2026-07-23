@@ -1,3 +1,5 @@
+"""把可编辑标注发布为不可变、可复现的 YOLO 数据版本。"""
+
 import hashlib
 import json
 import random
@@ -20,6 +22,8 @@ from app.services.storage import ManagedStorage
 
 
 class DatasetPublisher:
+    """校验草稿数据并原子发布图片、标签、清单和数据集元数据。"""
+
     def __init__(self, session_factory, storage: ManagedStorage, min_per_class: int = 10) -> None:
         self.session_factory = session_factory
         self.storage = storage
@@ -88,6 +92,8 @@ class DatasetPublisher:
             version_id = __import__("uuid").uuid4().hex
             relative_root = f"datasets/{dataset_id}/versions/{version_id}"
             root = self.storage.resolve(relative_root)
+            # 文件先写入同一文件系统中的 staging 目录。全部成功后再 rename，避免
+            # 训练进程观察到只包含部分图片或标签的版本目录。
             staging = root.with_name(root.name + ".partial")
             if staging.exists():
                 shutil.rmtree(staging)
@@ -151,6 +157,8 @@ class DatasetPublisher:
                     "identity_leakage_checked": False,
                     "items": manifest_items,
                 }
+                # 清单摘要基于排序、无多余空格的规范 JSON，与展示用缩进文件分离。
+                # 相同数据、标注、划分和 seed 会得到相同摘要。
                 canonical = json.dumps(
                     manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 )
@@ -200,6 +208,8 @@ class DatasetPublisher:
 
     @staticmethod
     def _split(images: list[ImageRow], seed: int) -> dict[str, str]:
+        """按感知哈希分组划分，防止近重复图片泄漏到不同集合。"""
+
         groups: dict[str, list[ImageRow]] = defaultdict(list)
         for image in images:
             groups[image.phash].append(image)
@@ -210,6 +220,7 @@ class DatasetPublisher:
         targets = {"train": total * 0.70, "val": total * 0.15, "test": total * 0.15}
         counts = Counter()
         for group in ordered:
+            # 整组放入当前缺口最大的集合；近重复组绝不会被拆开。
             split = max(targets, key=lambda name: targets[name] - counts[name])
             for image in group:
                 result[image.id] = split

@@ -1,3 +1,9 @@
+"""训练任务监督服务。
+
+HTTP 请求只创建持久化任务；耗时训练由独立子进程执行。父进程负责状态迁移、
+事件入库、取消信号和模型注册，从而避免模型库出现未完成的产物。
+"""
+
 import hashlib
 import json
 import os
@@ -14,6 +20,8 @@ from app.domain.training import TrainingSettings, TrainingState
 
 
 class TrainingService:
+    """在单机环境中协调一个活动训练任务及其 worker 子进程。"""
+
     def __init__(
         self,
         repository,
@@ -33,6 +41,8 @@ class TrainingService:
         self._lock = threading.Lock()
 
     def start(self, version_id: str, payload: dict) -> dict:
+        """校验白名单参数、先持久化任务，再启动后台监督线程。"""
+
         version = self.datasets.version(version_id)
         try:
             settings = TrainingSettings.from_payload(payload)
@@ -49,6 +59,8 @@ class TrainingService:
         task = self.repository.get(task_id)
         if task["state"] not in {"queued", "running"}:
             raise AppError("TRAINING_NOT_CANCELLABLE", "当前任务不能取消", 409)
+        # 先提交 cancelling，保证前端立即看到确定状态；marker 供 worker 在轮次
+        # 边界优雅退出，terminate 则处理 worker 卡在第三方库调用中的情况。
         result = self.repository.transition(task_id, TrainingState.CANCELLING)
         marker = self.storage.resolve(f"training/{task_id}/cancel")
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -66,6 +78,8 @@ class TrainingService:
         return self.start(old["dataset_version_id"], old["settings"])
 
     def _run(self, task_id: str, version: dict, settings: TrainingSettings) -> None:
+        """监督一次训练，并把任何退出路径收敛到持久化终态。"""
+
         try:
             self.repository.transition(task_id, TrainingState.RUNNING)
             self.repository.append_event(task_id, "started", {"device": settings.device})
@@ -81,6 +95,8 @@ class TrainingService:
                     error_message="训练已取消",
                 )
                 return
+            # 只有 worker 返回完整结果后才注册模型。这样失败或取消的任务不会在
+            # 模型库留下看似可用的半成品。
             model = self.models.create(
                 task_id,
                 f"眼镜检测模型 {task_id[:8]}",
@@ -151,6 +167,8 @@ class TrainingService:
         }
 
     def _worker_run(self, task_id: str, version: dict, settings: TrainingSettings) -> dict:
+        """通过 JSON 文件协议运行真实训练 worker，并归并其追加事件。"""
+
         if not self.resources.valid("yolo26n"):
             raise AppError("BASE_MODEL_UNAVAILABLE", "请先下载 yolo26n 预训练权重", 409)
         output = self.storage.resolve(f"training/{task_id}")
@@ -165,6 +183,7 @@ class TrainingService:
             raise AppError("ML_RUNTIME_UNAVAILABLE", "请先安装训练依赖", 409) from exc
         if settings.device == "cuda" and not torch.cuda.is_available():
             raise AppError("CUDA_UNAVAILABLE", "当前环境没有可用的 CUDA 设备", 409)
+        # API 的 auto 是产品语义；Ultralytics 接收的是具体设备编号或 cpu。
         use_cuda = settings.device in {"auto", "cuda"} and torch.cuda.is_available()
         actual_device = 0 if use_cuda else "cpu"
         request_path.write_text(
@@ -181,6 +200,7 @@ class TrainingService:
             encoding="utf-8",
         )
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        # argv 由服务端构造且 shell=False，用户输入不会成为命令行片段。
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -200,6 +220,7 @@ class TrainingService:
             self._processes[task_id] = process
         seen = 0
         while process.poll() is None:
+            # worker 只追加完整 JSON 行。seen 表示已持久化行数，轮询不会重复入库。
             seen = self._ingest_events(task_id, events_path, seen)
             time.sleep(0.2)
         self._ingest_events(task_id, events_path, seen)

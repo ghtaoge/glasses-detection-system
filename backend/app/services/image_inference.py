@@ -1,3 +1,5 @@
+"""图片推理、结果发布和历史删除的应用服务。"""
+
 import io
 import uuid
 
@@ -12,6 +14,8 @@ from app.services.rendering import render_detections
 
 
 class ImageInferenceService:
+    """加载当前活动模型，执行推理，并按需原子保存结果。"""
+
     def __init__(self, models, history, storage, validator) -> None:
         self.models = models
         self.history = history
@@ -26,6 +30,8 @@ class ImageInferenceService:
         iou: float = 0.45,
         source: str = "image",
     ) -> dict:
+        """推理图片并在文件全部发布后创建历史记录。"""
+
         validated, result = self.infer_only(filename, content, confidence, iou)
         result_data = result.as_dict()
         record_id = str(uuid.uuid4())
@@ -33,6 +39,8 @@ class ImageInferenceService:
         original_relative = f"history/{record_id}/original{extension}"
         annotated_relative = f"history/{record_id}/annotated.jpg"
         annotated = render_detections(Image.open(io.BytesIO(content)), result.detections)
+        # 数据库记录必须最后写入。若结果图编码或数据库提交失败，异常分支只清理
+        # 本次 record_id 对应的受控路径，不会触碰其他历史记录。
         self.storage.publish_bytes(original_relative, content)
         try:
             self.storage.publish_bytes(annotated_relative, annotated)
@@ -47,6 +55,8 @@ class ImageInferenceService:
     def infer_only(
         self, filename: str, content: bytes, confidence: float = 0.25, iou: float = 0.45
     ):
+        """只返回内存中的结果，供摄像头流使用，不写磁盘或历史表。"""
+
         validated = self.validator.validate_image(filename, content)
         model = self.models.active()
         if model is None:
@@ -55,6 +65,8 @@ class ImageInferenceService:
         if image_array is None:
             raise AppError("IMAGE_DECODE_FAILED", "图片解码失败")
         model_path = self.storage.resolve(model["onnx_path"])
+        # 模拟产物只在显式测试模式下可被激活；这里保留同一业务调用面，方便端到端
+        # 测试覆盖真实的上传、历史和渲染流程。
         if model_path.name.endswith(".fake.onnx"):
             engine = FakeInferenceEngine(model["id"])
         else:
@@ -71,11 +83,15 @@ class ImageInferenceService:
 
 
 class HistoryService:
+    """以可重试的两阶段流程删除历史元数据和文件。"""
+
     def __init__(self, repository, storage) -> None:
         self.repository = repository
         self.storage = storage
 
     def delete(self, record_id: str) -> None:
+        # 先标记 pending，防止删除中的记录继续出现在列表中。文件删除失败时保留
+        # pending 行，后续可安全重试；文件不存在视为已经删除。
         record = self.repository.mark_pending(record_id)
         try:
             for key in ("original_path", "annotated_path"):
@@ -84,4 +100,5 @@ class HistoryService:
                     path.unlink()
         except OSError as exc:
             raise AppError("HISTORY_DELETE_INCOMPLETE", "文件删除未完成，可稍后重试", 500) from exc
+        # 只有两个受控文件都处理完后，才删除检测项和主记录。
         self.repository.remove(record_id)

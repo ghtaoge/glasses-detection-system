@@ -1,3 +1,5 @@
+"""训练配置和值对象，以及允许的持久化状态迁移。"""
+
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
@@ -13,6 +15,7 @@ class TrainingState(StrEnum):
 
 
 ALLOWED_TRANSITIONS = {
+    # 终态没有出边。恢复训练会创建新任务并关联旧任务，而不是修改历史任务。
     TrainingState.QUEUED: {
         TrainingState.RUNNING,
         TrainingState.CANCELLING,
@@ -34,6 +37,8 @@ ALLOWED_TRANSITIONS = {
 
 @dataclass(frozen=True, slots=True)
 class TrainingSettings:
+    """API 可接受的完整参数白名单；不允许透传任意 Ultralytics 参数。"""
+
     preset: Literal["quick", "standard"] = "quick"
     epochs: int = 5
     image_size: int = 416
@@ -53,6 +58,8 @@ class TrainingSettings:
 
     @classmethod
     def from_payload(cls, payload: dict) -> "TrainingSettings":
+        """先展开预设默认值，再用用户显式字段覆盖并统一执行范围校验。"""
+
         preset = payload.get("preset", "quick")
         defaults = (
             {"epochs": 5, "image_size": 416, "batch_size": 4, "patience": 3}
